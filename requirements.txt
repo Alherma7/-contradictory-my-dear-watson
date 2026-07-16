@@ -1,0 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch==2.12.1+cu126
+transformers==5.12.1
+sentencepiece==0.2.2
+protobuf==7.35.1
+truststore==0.10.4
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.5.1
+matplotlib==3.9.2
+ipykernel==6.30.1
+nbconvert==7.16.4
+notebook==7.2.2
+jupyterlab==4.2.5
