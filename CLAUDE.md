@@ -3,8 +3,30 @@
 Notebook de NLI (PyTorch + Hugging Face Transformers + BERT multilingüe) para la competición Kaggle "Contradictory, My Dear Watson". Vive en `tutorial-notebook.ipynb`, con `train.csv`, `test.csv`, `sample_submission.csv` en el mismo directorio.
 
 El notebook tiene dos secciones:
-1. **Baseline**: fine-tuning completo de `bert-base-multilingual-cased` (masked-LM genérico, no preentrenado para NLI), 2 épocas, ~63.5% val_accuracy. Sin freezing de ninguna capa.
-2. **Transfer learning con mDeBERTa** (al final del notebook): parte de [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli), ya fine-tuneado en MNLI+XNLI (mismo formato de tarea, 100 idiomas). Congela embeddings + las 9 capas inferiores del encoder, entrena solo las 3 superiores + un classifier head nuevo (7.6% de los 278M parámetros son entrenables), con warmup+decay de LR y gradient clipping. Resultado: ~80.7% val_accuracy, +17 puntos sobre el baseline. Reutiliza el mismo split train/val (`train_idx`/`val_idx`) que el baseline para que la comparación sea justa; no modifica ni sustituye el baseline.
+1. **Baseline**: fine-tuning completo de `bert-base-multilingual-cased` (masked-LM genérico, no preentrenado para NLI), 2 épocas fijas, ~65.9% val_accuracy. Sin freezing de ninguna capa.
+2. **Transfer learning con mDeBERTa** (al final del notebook): parte de [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli), ya fine-tuneado en MNLI+XNLI (mismo formato de tarea, 100 idiomas). Congela embeddings + las 9 capas inferiores del encoder, entrena solo las 3 superiores + un classifier head nuevo (7.6% de los 278M parámetros son entrenables), con warmup+decay de LR, gradient clipping y hasta 15 épocas con early stopping (ver abajo). Resultado: ~88.0% val_accuracy, +22 puntos sobre el baseline (en la última ejecución, early stopping cortó en la época 7 tras 5 épocas sin mejora, quedándose con los pesos de la época 2). Reutiliza el mismo split train/val (`train_idx`/`val_idx`) que el baseline para que la comparación sea justa; no modifica ni sustituye el baseline.
+
+### `max_len`: el cuello de botella real
+
+`max_len` empezó en 50, heredado del baseline original. Con el tokenizer de mDeBERTa eso truncaba el **45.8%** de los pares premise+hypothesis (longitud mediana real: 48 tokens), cortando a menudo el hypothesis entero — la mitad de la información que el modelo necesita para clasificar. Subir `max_len` a 128 (cubre el 99.4% de los ejemplos sin truncar) fue, con diferencia, el cambio que más impactó el resultado: mDeBERTa pasó de ~81.2% a ~88.0% val_accuracy, y el baseline también mejoró (de ~64% a ~65.9%). Los ajustes de regularización (dropout, weight_decay, mean pooling) que se probaron antes de este fix dieron mejoras de solo décimas de punto en comparación — la lección es que con casi la mitad del dataset truncado, ningún ajuste de hiperparámetros iba a mover mucho la aguja. `max_len` es una constante compartida por `bert_encode`, así que el fix aplica a ambas secciones para mantener la comparación justa.
+
+### Reproducibilidad y regularización de mDeBERTa
+
+El baseline mostró ~1.3 puntos de varianza en val_accuracy entre ejecuciones idénticas (ruido del shuffling del `DataLoader` y la inicialización aleatoria del classifier nuevo), así que hay una celda de semilla fija (`SEED = 42`, justo después de los imports) que fija `random`, `numpy` y `torch`/CUDA antes de crear cualquier modelo o dataloader — no garantiza determinismo bit-exacto en GPU (cuDNN), pero elimina la mayor parte de esa varianza para que las comparaciones entre configuraciones sean fiables.
+
+`NLIModel` (compartida por baseline y mDeBERTa) acepta `dropout` (default `0.0`) y `pooling` (`'cls'` por defecto, o `'mean'` para promediar `last_hidden_state` sobre los tokens no-padding usando `attention_mask`) — ambos parámetros opcionales para que el baseline quede intacto. La instancia de mDeBERTa usa `dropout=0.4`, `weight_decay=0.1` en el optimizer y `pooling='mean'`; se llegó a esta combinación iterando sobre el overfitting observado (train_accuracy subiendo hasta ~90% mientras val_loss empeoraba tras la época 2-3 con solo CLS pooling y sin regularizar). El overfitting post-mejor-época sigue presente incluso con `max_len=128` (train_accuracy ~93% en la época 7 vs ~87-88% val), pero el early stopping ya lo neutraliza quedándose con los pesos de la mejor época.
+
+### Early stopping y checkpointing
+
+Ambos bucles de entrenamiento (baseline y mDeBERTa) guardan los pesos del modelo en `checkpoints/` (no versionado, ver `.gitignore`) tras cada época:
+- `{baseline,nli}_last.pt` se sobrescribe siempre con los pesos de la última época.
+- `{baseline,nli}_best.pt` solo se sobrescribe cuando la `val_loss` mejora respecto a la mejor vista hasta el momento.
+- Early stopping con `patience=5`: si la `val_loss` no mejora durante 5 épocas consecutivas, el bucle corta y se queda con `*_best.pt`. El baseline sigue fijado en 2 épocas (por debajo del patience, así que en la práctica no llega a activarse); mDeBERTa tiene hasta 15 épocas disponibles para que el early stopping tenga margen real de actuar.
+- Tras entrenar, cada sección recarga explícitamente `*_best.pt` (no los pesos en memoria de la última época) antes de calcular la matriz de confusión y las métricas finales — así el resultado reportado corresponde siempre al mejor checkpoint, no al último.
+
+### Matriz de confusión
+
+Al ser NLI un problema de clasificación de 3 clases (entailment / neutral / contradiction), cada sección incluye una matriz de confusión (`sklearn.metrics.ConfusionMatrixDisplay`, cmap `Blues`) sobre el split de validación, calculada con los pesos del mejor checkpoint (`*_best.pt`), justo después de su bucle de entrenamiento.
 
 ## Ejecutar el notebook con GPU
 
