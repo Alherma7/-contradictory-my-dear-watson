@@ -1,6 +1,6 @@
 # Watson (Contradictory, My Dear Watson)
 
-Notebook de NLI (PyTorch + Hugging Face Transformers + BERT multilingüe) para la competición Kaggle "Contradictory, My Dear Watson". Vive en `tutorial-notebook.ipynb`, con `train.csv`, `test.csv`, `sample_submission.csv` en el mismo directorio.
+Notebook de NLI (PyTorch + Hugging Face Transformers + BERT multilingüe) para la competición Kaggle "Contradictory, My Dear Watson". Vive en `watson-notebook.ipynb`, con `train.csv`, `test.csv`, `sample_submission.csv` en el mismo directorio.
 
 El notebook tiene dos secciones:
 1. **Baseline**: fine-tuning completo de `bert-base-multilingual-cased` (masked-LM genérico, no preentrenado para NLI), 2 épocas fijas, ~65.9% val_accuracy. Sin freezing de ninguna capa.
@@ -27,6 +27,25 @@ Ambos bucles de entrenamiento (baseline y mDeBERTa) guardan los pesos del modelo
 ### Matriz de confusión
 
 Al ser NLI un problema de clasificación de 3 clases (entailment / neutral / contradiction), cada sección incluye una matriz de confusión (`sklearn.metrics.ConfusionMatrixDisplay`, cmap `Blues`) sobre el split de validación, calculada con los pesos del mejor checkpoint (`*_best.pt`), justo después de su bucle de entrenamiento.
+
+### Augmentación por traducción, domain-adaptive pretraining y verificación de leakage
+
+Tras el baseline y mDeBERTa, el notebook añade un análisis de accuracy por idioma sobre el split de validación (mismo `val_idx` que el resto), que identificó ruso, tailandés y turco como los tres idiomas peor servidos (80.5%/81.2%/81.5%, todos por debajo del 87.7% global). Se probaron tres estrategias sobre esos tres idiomas, todas midiendo el efecto sobre el mismo `val_loader_nli`:
+
+1. **Augmentación por traducción** (`facebook/nllb-200-distilled-600M`, ~300 ejemplos por idioma traducidos desde inglés, label preservada): ruso +4.9pts (80.5%→85.4%), turco +1.9pts, **tailandés sin cambio** (81.2%→81.2%).
+2. **Ensemble** (promedio de softmax entre el modelo con y sin augmentación): no supera al mejor modelo individual — los dos checkpoints comparten ~91% del training set, así que sus errores están demasiado correlacionados para que promediar aporte algo.
+3. **Domain-adaptive pretraining (DAPT)** en tailandés: MLM continuado (`AutoModelForMaskedLM`, mismas `K=3` capas superiores entrenables) sobre un corpus de 913 frases tailandesas reales sin traducir (texto de `train_idx` + `test.csv`, nunca de `val_idx`), seguido de fine-tuning supervisado normal. Tampoco movió tailandés (81.16% exacto, idéntico a las otras dos estrategias) — dos vías completamente distintas convergiendo al mismo resultado nulo sugiere que el cuello de botella en tailandés no es de representación/dominio, sino probablemente ambigüedad genuina en los propios ejemplos; pendiente de inspección manual antes de seguir invirtiendo en más datos o más pretraining para ese idioma.
+
+Se verificó también **data leakage** entre `train_idx`/`val_idx`: cero duplicados exactos `premise+hypothesis`, pero un 47.3% de las premises de validación también aparecen en train con otra hypothesis/label (el dataset genera hasta 3 filas por premise y el split no agrupa por ese campo). Comparando accuracy entre el subconjunto con esa fuga y el subconjunto limpio salió prácticamente idéntico (87.5% vs 87.9%), así que **no infla las cifras reportadas** — no fue necesario rehacer el split.
+
+Dos mejoras más, ambas orientadas al procedimiento de entrenamiento en vez de a los datos:
+
+- **Checkpoint averaging (SWA-style)** sobre `model_nli_aug`: promediar los pesos de las épocas 2, 3 y 4 (la mejor fue la 3) dio 88.37% frente al 88.41% del mejor checkpoint solo — un empate técnico, ligeramente negativo. Con un LR schedule que decae (no constante/cíclico como requiere SWA para funcionar bien), las épocas cercanas a la mejor ya están demasiado convergidas entre sí como para que promediarlas aporte diversidad real.
+- **Gradual unfreezing**: en vez de fijar `K=3` capas entrenables desde la época 1, se activa progresivamente (mismo presupuesto de 5 épocas que `model_nli_aug`, mismo optimizer construido una sola vez sobre todos los parámetros para no perder momentum al cambiar `requires_grad`). Rampa final `K: 0→2→4→6→8` (un primer intento con `K: 0→3→6→9→12`, hasta el encoder completo, provocó un **reset del driver de NVIDIA por TDR** — ver aviso más abajo — así que se recortó). Resultado: 87.71%→88.08% (+0.37pts) sin tocar los datos, idéntico al resultado obtenido con una rampa más corta (tope `K=3`) — confirma, igual que ya hizo el `K=6` estático, que más capacidad entrenable no mueve el techo de esta tarea; la ganancia viene de introducir el descongelamiento *progresivo* en sí, no de cuánto se acaba liberando. El mejor checkpoint fue el de la época 3 (`K=4`), no el final: las épocas con `K` más alto ya sobreajustaban. Ganancias en ruso (+2.4pts) y turco (+1.9pts) parecidas en magnitud a las de la augmentación por traducción, pero por una vía distinta (procedimiento de entrenamiento, no datos). Tailandés bajó a 79.7% en esta rampa más larga (antes se quedaba plano en 81.2% con las otras tres estrategias) — ya son cuatro intentos distintos que no lo mejoran, lo que apunta a ambigüedad genuina en esos ejemplos más que a un problema de datos/representación/procedimiento.
+
+### Aviso: reset de driver de NVIDIA (TDR) con cargas de entrenamiento pesadas
+
+Entrenar con `K` alto (p.ej. descongelar el encoder completo, `K=12`) puede disparar un **reset del driver de NVIDIA** en este equipo — Windows fuerza un reset de la GPU (TDR, Timeout Detection and Recovery) si un kernel CUDA individual tarda más del umbral por defecto de 2 segundos sin responder, y el backward completo por las 12 capas de un modelo de disentangled attention como DeBERTa-v3 puede superarlo. Se manifiesta como un proceso Python matado sin excepción capturable ni traceback (a diferencia de un `OutOfMemoryError`, que sí es capturable) — para diagnosticarlo, comprobar en el Visor de sucesos de Windows (`Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='nvlddmkm'}`) un evento de error ID 153 con el mismo timestamp que el corte. El fix estándar es subir `HKLM\\SYSTEM\\CurrentControlSet\\Control\\GraphicsDrivers\\TdrDelay` (DWORD, segundos; por defecto 2) a un valor mayor (p.ej. 60) y reiniciar — no aplicado en este repo por decisión explícita del usuario; en su lugar, evitar cargas de entrenamiento tan pesadas (`K` más bajo, batch más pequeño) es la mitigación usada aquí.
 
 ## Ejecutar el notebook con GPU
 
@@ -56,7 +75,7 @@ Antes de ejecutar el notebook:
 
 3. **Ejecutar el notebook usando el kernel/venv `watson-nli`**, no el Python global ni el conda `base`:
    ```
-   .venv\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace tutorial-notebook.ipynb
+   .venv\Scripts\jupyter.exe nbconvert --to notebook --execute --inplace watson-notebook.ipynb
    ```
    Esto puede tardar varios minutos (descarga del modelo BERT + 2 épocas de entrenamiento). Lanzarlo en background y avisar cuando termine.
 
