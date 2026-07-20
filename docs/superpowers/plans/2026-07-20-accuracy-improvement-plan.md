@@ -15,7 +15,7 @@
 - Reutilizar siempre el mismo split `train_idx`/`val_idx` (celda 25, `test_size=0.2, random_state=42`) y el mismo `val_loader_nli` (celda 47) para que las comparaciones entre modelos sean justas.
 - `checkpoint_dir = 'checkpoints'` (no versionado, ver `.gitignore`) — todos los checkpoints nuevos van ahí con el mismo patrón `{nombre}_last.pt` / `{nombre}_best.pt`.
 - `class_names = ['entailment', 'neutral', 'contradiction']` — orden de labels fijo en todo el notebook, no reordenar.
-- GPU: RTX 4060 Laptop, 8GB VRAM. La Tarea 3 requiere que `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\TdrDelay` ya se haya subido y la máquina reiniciado — es un cambio de registro de Windows que requiere confirmación explícita del usuario en el momento, nunca asumir que ya está hecho.
+- GPU: RTX 4060 Laptop, 8GB VRAM. **Actualización 2026-07-20:** se decidió NO subir `TdrDelay` (el usuario prefirió no tocar el registro tras un TDR real ese mismo día durante la Tarea 2, causado por contención de GPU con ScreenPal/protector de pantalla, ya cerrados). La Tarea 3 corre con el `TdrDelay` por defecto de Windows (2s) y compensa reduciendo aún más la duración de cada paso: `batch_size_large=8`, `grad_accum_steps_large=4` desde el inicio (antes eran 16/2; ese valor queda como referencia de qué tan agresivo NO ser). Si esto tampoco basta, no hay más margen por este lado sin tocar el registro — la vía correctiva sería reconsiderar con el usuario, no seguir bajando el batch indefinidamente.
 - Ejecución del notebook: correr las celdas 0–66 en orden (contienen toda la preparación de datos, el baseline, `model_nli` y `model_nli_aug` — necesarias como prerequisito de las Tareas 1–4) y **saltarse las celdas 67–99** (ensemble, DAPT, verificación de leakage, checkpoint averaging, gradual unfreezing) — ninguna de las tareas de este plan depende de ellas. Como optimización opcional (los checkpoints `baseline_best.pt`, `nli_best.pt`, `nli_aug_best.pt` ya existen en disco de una ejecución anterior), se pueden saltar los bucles de entrenamiento de las celdas 30/49/62 y en su lugar cargar el `state_dict` guardado directamente — en ese caso, fijar a mano `baseline_best_val_accuracy`/`nli_best_val_accuracy`/`nli_aug_best_val_accuracy` con los valores ya documentados (65.9%/88.0%/88.41%) para que las celdas posteriores que referencian esas variables no fallen con `NameError`.
 
 ---
@@ -279,7 +279,7 @@ EOF
 
 ## Task 3: Vía B — backbone genuinamente más grande (P2) — `xlm-roberta-large-xnli`
 
-**Precondition (manual, no automatizable):** confirmar explícitamente con el usuario que `HKLM\SYSTEM\CurrentControlSet\Control\GraphicsDrivers\TdrDelay` ya se subió (p.ej. a 60s) y la máquina se reinició, antes de ejecutar cualquier celda de entrenamiento de esta tarea. No asumir que ya está hecho solo porque se acordó durante el brainstorming.
+**Precondition (resuelta 2026-07-20):** el usuario decidió NO subir `TdrDelay` tras un TDR real ese día durante la Tarea 2 (causado por contención de GPU con ScreenPal/protector de pantalla — ya cerrados, y ese TDR no volvió a repetirse tras cerrarlos). Esta tarea corre con el `TdrDelay` por defecto (2s) y usa `batch_size_large=8`/`grad_accum_steps_large=4` desde el inicio (más conservador que el 16/2 original) para mantener cada paso de entrenamiento bien por debajo del umbral. Antes de arrancar, confirmar que ScreenPal y cualquier protector de pantalla activo siguen cerrados (`tasklist` o `nvidia-smi --query-compute-apps`). Si aun así ocurre un TDR, no seguir bajando el batch indefinidamente — reportarlo y volver a decidir con el usuario en vez de reintentar a ciegas.
 
 **Files:**
 - Modify: `watson-notebook.ipynb:cell 23` (`bert_encode`) — fix retrocompatible para tokenizers sin `token_type_ids`.
@@ -289,7 +289,7 @@ EOF
 - Consumes: `bert_encode` (editada), `train_aug_df`, `train_labels_aug`, `labels`, `val_idx`, `train`, `NLIDataset`, `K`, `criterion`, `checkpoint_dir`, `device`, `NLIModel`, `get_linear_schedule_with_warmup`, `val_lang_nli`, `lang_acc_aug`, `lang_acc_pretrain`, `nli_aug_best_val_accuracy`, `nli_pretrain_best_val_accuracy`.
 - Produces: `model_nli_large`, `tokenizer_nli_large`, `model_name_nli_large`, `nli_large_best_val_accuracy`, checkpoints `nli_large_last.pt`/`nli_large_best.pt` — consumidos por la Tarea 4.
 
-- [ ] **Step 1: Confirmar con el usuario que el precondition de arriba (TdrDelay + reinicio) está cumplido.** No continuar sin confirmación explícita.
+- [ ] **Step 1: Confirmar que ScreenPal y cualquier protector de pantalla activo siguen cerrados** (`tasklist | findstr /I "screenpal screensaver"` o equivalente) antes de arrancar cualquier celda de entrenamiento. Ver precondition de arriba.
 
 - [ ] **Step 2: Editar la celda 23 (`bert_encode`) para tolerar tokenizers sin `token_type_ids`**
 
@@ -330,9 +330,11 @@ Re-ejecutar esta celda (y todo lo que dependa de ella aguas abajo, si el kernel 
 `joeddav/xlm-roberta-large-xnli` (XLM-RoBERTa-large fine-tuneado en XNLI,
 ~560M parámetros, 24 capas — ~2x mDeBERTa-base) es un tokenizer distinto
 (vocabulario XLM-R, sin `token_type_ids`), así que retokenizamos
-`train_aug_df` y el split de validación. Reducimos `batch_size` a la mitad
-y usamos gradient accumulation (batch efectivo = 32, igual que el resto)
-para no sobrecargar los 8GB de VRAM incluso con el TdrDelay ya subido.
+`train_aug_df` y el split de validación. Reducimos `batch_size` a una
+cuarta parte (8, no 16) y usamos gradient accumulation más agresivo
+(batch efectivo = 32, igual que el resto) para mantener cada paso de
+entrenamiento bien por debajo del umbral de TDR por defecto (2s) — no se
+subió `TdrDelay` (decisión del usuario tras un TDR real el mismo día).
 `K=3` capas superiores entrenables (de 24) — misma fracción pequeña que en
 las demás secciones; la lección de gradual unfreezing es que más capacidad
 entrenable no mueve el techo, así que no la ampliamos solo por tener más
@@ -357,9 +359,11 @@ train_dataset_nli_large = NLIDataset(train_input_nli_large, train_labels_aug)
 val_input_nli_large = bert_encode(train.iloc[val_idx].premise.values, train.iloc[val_idx].hypothesis.values, tokenizer_nli_large)
 val_dataset_nli_large = NLIDataset(val_input_nli_large, labels[val_idx])
 
-batch_size_large = 16  # mitad de batch_size=32: xlm-roberta-large tiene ~2x parametros y
-                        # ~2x capas (24 vs 12) que mDeBERTa-base, mas activaciones en VRAM
-grad_accum_steps_large = 2  # batch efectivo = 16*2 = 32, igual que el resto de secciones
+batch_size_large = 8  # 1/4 de batch_size=32: xlm-roberta-large tiene ~2x parametros y
+                       # ~2x capas (24 vs 12) que mDeBERTa-base, mas activaciones en VRAM.
+                       # Sin subir TdrDelay (decision del usuario), un batch chico mantiene
+                       # cada paso de entrenamiento bien por debajo del umbral de TDR (2s).
+grad_accum_steps_large = 4  # batch efectivo = 8*4 = 32, igual que el resto de secciones
 
 train_loader_nli_large = DataLoader(train_dataset_nli_large, batch_size=batch_size_large, shuffle=True)
 val_loader_nli_large = DataLoader(val_dataset_nli_large, batch_size=batch_size_large)
@@ -474,7 +478,7 @@ for epoch in range(epochs_nli_large):
             break
 ```
 
-**Vigilar durante la ejecución:** el tiempo por época. Si un solo forward+backward se acerca al nuevo umbral de `TdrDelay`, interrumpir y avisar al usuario en vez de dejar que Windows mate el proceso sin traceback (ver aviso de TDR en `CLAUDE.md`). Si aparece un `CUDA out of memory`, es capturable (a diferencia de un TDR) — reducir `batch_size_large` a 8 y subir `grad_accum_steps_large` a 4 (mismo batch efectivo) antes de reintentar.
+**Vigilar durante la ejecución:** el tiempo por paso (no por época — el TDR se dispara por un único forward+backward que tarde de más, no por la duración total). El `TdrDelay` sigue en su valor por defecto (2s, no se subió). Si aun con `batch_size_large=8` ocurre un TDR (proceso muerto sin excepción capturable — comprobar `Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='nvlddmkm'}` para un evento ID 153 con el mismo timestamp), no seguir bajando el batch por tu cuenta — reportarlo al usuario y decidir juntos el siguiente paso (podría no ser un problema de batch/duración sino de otra contención de GPU, como ya pasó una vez en la Tarea 2). Si aparece un `CUDA out of memory` en su lugar, sí es capturable (a diferencia de un TDR) — en ese caso reducir `batch_size_large` a 4 y subir `grad_accum_steps_large` a 8 (mismo batch efectivo) antes de reintentar.
 
 Expected: imprime una línea `Epoch N/5 - ...` por época y al menos un `-> nuevo mejor val_loss (...)`.
 
