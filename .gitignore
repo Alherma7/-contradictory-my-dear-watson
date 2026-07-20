@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .ipynb_checkpoints/
 checkpoints/
+.superpowers/
 
 # Datos de la competición Kaggle (descargar desde la página del concurso)
 train.csv
