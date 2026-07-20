@@ -9,7 +9,7 @@ Todo el trabajo vive en [`watson-notebook.ipynb`](watson-notebook.ipynb).
 | Modelo | val_accuracy | Notas |
 |---|---|---|
 | `bert-base-multilingual-cased` (baseline) | ~65.9% | Masked-LM genérico, no preentrenado para NLI. Fine-tuning completo, 2 épocas. |
-| `mDeBERTa-v3-base-mnli-xnli` + augmentación por traducción (`model_nli_aug`) | **88.4%** | Mejor modelo actual — el que genera `submission.csv`. |
+| `mDeBERTa-v3-base-mnli-xnli` + aumentación por traducción (`model_nli_aug`) | **88.4%** | Mejor modelo actual — el que genera `submission.csv`. |
 | `mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (checkpoint alternativo) | 87.2% | Experimento: más pretraining NLI no mejora sobre `model_nli_aug`. |
 | `xlm-roberta-large-xnli` (backbone 2x más grande) | ~92.8%* | Prometedor — entrenado dos veces con resultado consistente, pero aún no integrado formalmente en el notebook (ver [Estado actual](#estado-actual-2026-07-20)). |
 
