@@ -31,6 +31,12 @@ Trabajo de mejora de accuracy completo, con `submission.csv` regenerado a partir
 - El entrenamiento del backbone grande se hizo con `batch_size=8` + gradient accumulation (batch efectivo 32) para evitar el reset de driver NVIDIA (TDR) documentado en [`CLAUDE.md`](CLAUDE.md); no volvió a ocurrir tras cerrar ScreenPal (la causa real, confirmada) antes de entrenar.
 - Para subirlo a Kaggle hace falta [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (esta competición exige un notebook ejecutado en el propio entorno de Kaggle, no la subida directa de un CSV) — ver [`CLAUDE.md`](CLAUDE.md) para los pasos manuales de configuración.
 
+## Resultado en el leaderboard de Kaggle
+
+Tras ejecutar `kaggle-submission.ipynb` en Kaggle y enviar la predicción, el modelo obtuvo **0.92608** en el leaderboard público de la competición — consistente con el ~93.0% de val_accuracy medido localmente.
+
+![Leaderboard de Kaggle: Alejandro Hernández Mairal, puesto 35, score 0.92608](leaderboard_contradictory_my_dear_watson.png)
+
 ## Datos
 
 Los ficheros `train.csv`, `test.csv` y `sample_submission.csv` no están incluidos en este repo (son los datos de la competición Kaggle). Descárgalos desde la [página de datos de la competición](https://www.kaggle.com/competitions/contradictory-my-dear-watson/data) y colócalos en la raíz del proyecto antes de ejecutar el notebook.
