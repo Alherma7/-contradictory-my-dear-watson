@@ -10,3 +10,6 @@ train.csv
 test.csv
 sample_submission.csv
 submission.csv
+
+# Notas internas de trabajo con Claude Code -- no publicadas en GitHub
+CLAUDE.md

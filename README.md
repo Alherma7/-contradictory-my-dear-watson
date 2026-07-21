@@ -19,8 +19,6 @@ All the work lives in [`watson-notebook.ipynb`](watson-notebook.ipynb).
 2. **Transfer learning with mDeBERTa**: starts from [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli), already fine-tuned on MNLI+XNLI. Freezes embeddings + the 9 lower encoder layers, trains only the top 3 layers plus a new classifier head (7.6% of parameters), with LR warmup+decay, gradient clipping, and early stopping. The change with the biggest impact on the result was raising `max_len` from 50 to 128 — at 50, mDeBERTa's tokenizer truncated 45.8% of the examples.
 3. **Per-language analysis and translation augmentation**: identifies the worst-served languages (Russian, Thai, Turkish) and tries augmenting data via translation (`facebook/nllb-200-distilled-600M`), ensembling, domain-adaptive pretraining on Thai, data leakage verification, checkpoint averaging (SWA-style), and gradual encoder unfreezing.
 
-Full details of each experiment, numeric results, and lessons learned (what improved, what didn't, and why) are in [`CLAUDE.md`](CLAUDE.md).
-
 ## Current status (2026-07-21)
 
 Accuracy-improvement work complete, with `submission.csv` regenerated from the best of three candidates:
@@ -29,7 +27,7 @@ Accuracy-improvement work complete, with `submission.csv` regenerated from the b
 - **Alternative checkpoint experiment** (`mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`, same size, more NLI pretraining): negative result, 87.2% vs. 88.4% for `model_nli_aug`.
 - **Larger-backbone experiment** (`xlm-roberta-large-xnli`, ~560M parameters vs. mDeBERTa's ~278M): **93.0%**, +4.6 points over `model_nli_aug` — the best result by far, and the one now generating `submission.csv`. This contradicts the lesson from the gradual-unfreezing experiments (more trainable capacity within the same backbone didn't raise the ceiling): a genuinely different, larger backbone did.
 - Training the large backbone used `batch_size=8` with gradient accumulation (effective batch size 32) to keep memory usage manageable.
-- Uploading to Kaggle requires [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (this competition requires a notebook executed inside Kaggle's own environment, not a direct CSV upload) — see [`CLAUDE.md`](CLAUDE.md) for the manual setup steps.
+- Uploading to Kaggle requires [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (this competition requires a notebook executed inside Kaggle's own environment, not a direct CSV upload).
 
 ## Kaggle leaderboard result
 
@@ -47,4 +45,4 @@ The `train.csv`, `test.csv`, and `sample_submission.csv` files are not included 
 
 ## Environment
 
-The project uses a dedicated Python venv (not conda) with versions pinned in [`requirements.txt`](requirements.txt), including a CUDA-enabled PyTorch build (`+cu126`) for GPU training. Full setup and execution instructions are in [`CLAUDE.md`](CLAUDE.md).
+The project uses a dedicated Python venv (not conda) with versions pinned in [`requirements.txt`](requirements.txt), including a CUDA-enabled PyTorch build (`+cu126`) for GPU training.
