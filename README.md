@@ -29,6 +29,7 @@ Trabajo de mejora de accuracy completo, con `submission.csv` regenerado a partir
 - **Experimento con checkpoint alternativo** (`mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`, mismo tamaño, más pretraining NLI): resultado negativo, 87.2% frente al 88.4% de `model_nli_aug`.
 - **Experimento con backbone más grande** (`xlm-roberta-large-xnli`, ~560M parámetros frente a los ~278M de mDeBERTa): **93.0%**, +4.6 puntos sobre `model_nli_aug` — el mejor resultado con diferencia, y el que ahora genera `submission.csv`. Contradice la lección de los experimentos de descongelamiento gradual (más capacidad entrenable dentro del mismo backbone no movía el techo): un backbone genuinamente distinto y más grande sí lo hizo.
 - El entrenamiento del backbone grande se hizo con `batch_size=8` + gradient accumulation (batch efectivo 32) para evitar el reset de driver NVIDIA (TDR) documentado en [`CLAUDE.md`](CLAUDE.md); no volvió a ocurrir tras cerrar ScreenPal (la causa real, confirmada) antes de entrenar.
+- Para subirlo a Kaggle hace falta [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (esta competición exige un notebook ejecutado en el propio entorno de Kaggle, no la subida directa de un CSV) — ver [`CLAUDE.md`](CLAUDE.md) para los pasos manuales de configuración.
 
 ## Datos
 
