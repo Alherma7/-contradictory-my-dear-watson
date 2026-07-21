@@ -1,46 +1,50 @@
 # Contradictory, My Dear Watson
 
-Notebook de NLI (Natural Language Inference) en PyTorch + Hugging Face Transformers para la competición Kaggle [Contradictory, My Dear Watson](https://www.kaggle.com/competitions/contradictory-my-dear-watson), que consiste en clasificar pares de frases (premisa/hipótesis) en 100+ idiomas como *entailment*, *neutral* o *contradiction*.
+PyTorch + Hugging Face Transformers NLI (Natural Language Inference) notebook for the Kaggle competition [Contradictory, My Dear Watson](https://www.kaggle.com/competitions/contradictory-my-dear-watson), which involves classifying premise/hypothesis sentence pairs in 100+ languages as *entailment*, *neutral*, or *contradiction*.
 
-Todo el trabajo vive en [`watson-notebook.ipynb`](watson-notebook.ipynb).
+All the work lives in [`watson-notebook.ipynb`](watson-notebook.ipynb).
 
-## Resultados
+## Results
 
-| Modelo | val_accuracy | Notas |
+| Model | val_accuracy | Notes |
 |---|---|---|
-| `bert-base-multilingual-cased` (baseline) | ~65.9% | Masked-LM genérico, no preentrenado para NLI. Fine-tuning completo, 2 épocas. |
-| `mDeBERTa-v3-base-mnli-xnli` + aumento datos por traducción (`model_nli_aug`) | 88.4% | |
-| `mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (checkpoint alternativo) | 87.2% | Experimento: más pretraining NLI no mejora sobre `model_nli_aug`. |
-| `xlm-roberta-large-xnli` (backbone 2x más grande, `model_nli_large`) | **93.0%** | Mejor modelo — el que genera `submission.csv`. |
+| `bert-base-multilingual-cased` (baseline) | ~65.9% | Generic masked-LM, not pretrained for NLI. Full fine-tuning, 2 epochs. |
+| `mDeBERTa-v3-base-mnli-xnli` + translation-based data augmentation (`model_nli_aug`) | 88.4% | |
+| `mDeBERTa-v3-base-xnli-multilingual-nli-2mil7` (alternative checkpoint) | 87.2% | Experiment: more NLI pretraining doesn't beat `model_nli_aug`. |
+| `xlm-roberta-large-xnli` (2x larger backbone, `model_nli_large`) | **93.0%** | Best model — the one that generates `submission.csv`. |
 
-## Estructura del notebook
+## Notebook structure
 
-1. **Baseline**: fine-tuning completo de `bert-base-multilingual-cased`, 2 épocas fijas, sin congelar ninguna capa.
-2. **Transfer learning con mDeBERTa**: parte de [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli), ya fine-tuneado en MNLI+XNLI. Congela embeddings + las 9 capas inferiores del encoder, entrena solo las 3 superiores + un classifier head nuevo (7.6% de los parámetros), con warmup+decay de LR, gradient clipping y early stopping. El ajuste con más impacto en el resultado fue subir `max_len` de 50 a 128 — con 50, el tokenizer de mDeBERTa truncaba el 45.8% de los ejemplos.
-3. **Análisis por idioma y augmentación por traducción**: identifica los idiomas peor servidos (ruso, tailandés, turco) y prueba aumentar datos vía traducción (`facebook/nllb-200-distilled-600M`), ensemble, domain-adaptive pretraining en tailandés, verificación de data leakage, checkpoint averaging (SWA-style) y descongelamiento gradual del encoder.
+1. **Baseline**: full fine-tuning of `bert-base-multilingual-cased`, fixed 2 epochs, no frozen layers.
+2. **Transfer learning with mDeBERTa**: starts from [`MoritzLaurer/mDeBERTa-v3-base-mnli-xnli`](https://huggingface.co/MoritzLaurer/mDeBERTa-v3-base-mnli-xnli), already fine-tuned on MNLI+XNLI. Freezes embeddings + the 9 lower encoder layers, trains only the top 3 layers plus a new classifier head (7.6% of parameters), with LR warmup+decay, gradient clipping, and early stopping. The change with the biggest impact on the result was raising `max_len` from 50 to 128 — at 50, mDeBERTa's tokenizer truncated 45.8% of the examples.
+3. **Per-language analysis and translation augmentation**: identifies the worst-served languages (Russian, Thai, Turkish) and tries augmenting data via translation (`facebook/nllb-200-distilled-600M`), ensembling, domain-adaptive pretraining on Thai, data leakage verification, checkpoint averaging (SWA-style), and gradual encoder unfreezing.
 
-Detalles completos de cada experimento, resultados numéricos y las lecciones aprendidas (qué mejoró, qué no y por qué) en [`CLAUDE.md`](CLAUDE.md).
+Full details of each experiment, numeric results, and lessons learned (what improved, what didn't, and why) are in [`CLAUDE.md`](CLAUDE.md).
 
-## Estado actual (2026-07-21)
+## Current status (2026-07-21)
 
-Trabajo de mejora de accuracy completo, con `submission.csv` regenerado a partir del mejor de tres candidatos:
+Accuracy-improvement work complete, with `submission.csv` regenerated from the best of three candidates:
 
-- **Corregido un bug real**: `submission.csv` se generaba con el modelo baseline (~65.9%), no con el mejor modelo entrenado — ninguna celda de las secciones de transfer learning volvía a generar predicciones sobre `test.csv`.
-- **Experimento con checkpoint alternativo** (`mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`, mismo tamaño, más pretraining NLI): resultado negativo, 87.2% frente al 88.4% de `model_nli_aug`.
-- **Experimento con backbone más grande** (`xlm-roberta-large-xnli`, ~560M parámetros frente a los ~278M de mDeBERTa): **93.0%**, +4.6 puntos sobre `model_nli_aug` — el mejor resultado con diferencia, y el que ahora genera `submission.csv`. Contradice la lección de los experimentos de descongelamiento gradual (más capacidad entrenable dentro del mismo backbone no movía el techo): un backbone genuinamente distinto y más grande sí lo hizo.
-- El entrenamiento del backbone grande se hizo con `batch_size=8` + gradient accumulation (batch efectivo 32) para evitar el reset de driver NVIDIA (TDR) documentado en [`CLAUDE.md`](CLAUDE.md); no volvió a ocurrir tras cerrar ScreenPal (la causa real, confirmada) antes de entrenar.
-- Para subirlo a Kaggle hace falta [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (esta competición exige un notebook ejecutado en el propio entorno de Kaggle, no la subida directa de un CSV) — ver [`CLAUDE.md`](CLAUDE.md) para los pasos manuales de configuración.
+- **Fixed a real bug**: `submission.csv` was being generated with the baseline model (~65.9%), not the best trained model — no cell in the transfer-learning sections re-generated predictions on `test.csv`.
+- **Alternative checkpoint experiment** (`mDeBERTa-v3-base-xnli-multilingual-nli-2mil7`, same size, more NLI pretraining): negative result, 87.2% vs. 88.4% for `model_nli_aug`.
+- **Larger-backbone experiment** (`xlm-roberta-large-xnli`, ~560M parameters vs. mDeBERTa's ~278M): **93.0%**, +4.6 points over `model_nli_aug` — the best result by far, and the one now generating `submission.csv`. This contradicts the lesson from the gradual-unfreezing experiments (more trainable capacity within the same backbone didn't raise the ceiling): a genuinely different, larger backbone did.
+- Training the large backbone used `batch_size=8` with gradient accumulation (effective batch size 32) to keep memory usage manageable.
+- Uploading to Kaggle requires [`kaggle-submission.ipynb`](kaggle-submission.ipynb) (this competition requires a notebook executed inside Kaggle's own environment, not a direct CSV upload) — see [`CLAUDE.md`](CLAUDE.md) for the manual setup steps.
 
-## Resultado en el leaderboard de Kaggle
+## Kaggle leaderboard result
 
-Tras ejecutar `kaggle-submission.ipynb` en Kaggle y enviar la predicción, el modelo obtuvo **0.92608** en el leaderboard público de la competición — consistente con el ~93.0% de val_accuracy medido localmente.
+After running `kaggle-submission.ipynb` on Kaggle and submitting the prediction, the model scored **0.92608** on the competition's public leaderboard — consistent with the ~93.0% val_accuracy measured locally.
 
-![Leaderboard de Kaggle: Alejandro Hernández Mairal, puesto 35, score 0.92608](leaderboard_contradictory_my_dear_watson.png)
+![Kaggle leaderboard: Alejandro Hernández Mairal, rank 35, score 0.92608](leaderboard_contradictory_my_dear_watson.png)
 
-## Datos
+## Future work
 
-Los ficheros `train.csv`, `test.csv` y `sample_submission.csv` no están incluidos en este repo (son los datos de la competición Kaggle). Descárgalos desde la [página de datos de la competición](https://www.kaggle.com/competitions/contradictory-my-dear-watson/data) y colócalos en la raíz del proyecto antes de ejecutar el notebook.
+- **Knowledge distillation**: `model_nli_large` (`xlm-roberta-large-xnli`, ~560M parameters) is the best-scoring model, but it's 2x the size of the mDeBERTa-based candidates. Distilling it into a smaller student model is worth trying, to see how much of the +4.6pt accuracy gain over `model_nli_aug` can be kept while cutting parameter count.
 
-## Entorno
+## Data
 
-El proyecto usa un venv de Python dedicado (no conda) con las versiones fijadas en [`requirements.txt`](requirements.txt), incluyendo un build de PyTorch con soporte CUDA (`+cu126`) para entrenar en GPU. Instrucciones completas de configuración y ejecución en [`CLAUDE.md`](CLAUDE.md).
+The `train.csv`, `test.csv`, and `sample_submission.csv` files are not included in this repo (they're the Kaggle competition data). Download them from the [competition's data page](https://www.kaggle.com/competitions/contradictory-my-dear-watson/data) and place them in the project root before running the notebook.
+
+## Environment
+
+The project uses a dedicated Python venv (not conda) with versions pinned in [`requirements.txt`](requirements.txt), including a CUDA-enabled PyTorch build (`+cu126`) for GPU training. Full setup and execution instructions are in [`CLAUDE.md`](CLAUDE.md).
