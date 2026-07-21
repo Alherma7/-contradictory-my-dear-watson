@@ -89,6 +89,32 @@ import truststore
 truststore.inject_into_ssl()
 ```
 
+## Submission a Kaggle (`kaggle-submission.ipynb`)
+
+`watson-notebook.ipynb` genera `submission.csv` localmente, pero esta
+competición no acepta subir ese CSV directamente: exige un notebook
+ejecutado dentro del entorno de Kaggle ("Save & Run All") cuyo output sea
+`submission.csv`, seguido de "Submit to Competition" desde ahí.
+
+`kaggle-submission.ipynb` es ese notebook: separado del notebook de
+experimentación, solo hace inferencia con el checkpoint ya entrenado
+(`checkpoints/nli_large_best.pt`, el ganador de la comparación de
+backbones, 92.99% val_accuracy) — no reentrena nada ni repite la
+augmentación por traducción que se usó para entrenarlo, porque esa
+augmentación ya está reflejada en los pesos del checkpoint.
+
+Pasos manuales antes de ejecutarlo en Kaggle (no automatizables desde este
+repo: no hay `kaggle.json` configurado en esta máquina):
+
+1. Subir `checkpoints/nli_large_best.pt` (2.24GB) como Kaggle Dataset
+   privado nuevo, vía la web de Kaggle (Datasets → New Dataset).
+2. Adjuntar ese dataset al notebook en Kaggle (Add Input) y actualizar la
+   constante `CHECKPOINT_PATH` de la celda 2 con la ruta que Kaggle le
+   asigne.
+3. Activar Internet en Settings del notebook en Kaggle (necesario para
+   descargar el tokenizer y la arquitectura base de
+   `joeddav/xlm-roberta-large-xnli` desde Hugging Face Hub).
+
 ## Cuidado con la precisión (fp16 vs fp32) al cargar modelos nuevos
 
 Algunos checkpoints de Hugging Face (p.ej. `mDeBERTa-v3-base-mnli-xnli`) están guardados en fp16, y `AutoModel.from_pretrained` carga los pesos en esa precisión por defecto. Si se combina con una capa nueva en fp32 (como el `classifier` de `NLIModel`), falla con `RuntimeError: mat1 and mat2 must have the same dtype, but got Half and Float`. Al instanciar un backbone nuevo, forzar fp32 explícitamente: `NLIModel(model_name).float().to(device)`.
